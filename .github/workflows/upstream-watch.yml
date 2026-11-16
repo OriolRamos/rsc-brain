@@ -19,11 +19,14 @@ jobs:
       - name: Compare with upstream
         id: diff
         run: |
-          git fetch --quiet --tags "$UPSTREAM" '+refs/heads/main:refs/remotes/upstream/main'
+          # Upstream's tags go to their own namespace: a tag of the same name in this fork never clashes.
+          git fetch --quiet --no-tags "$UPSTREAM" '+refs/heads/main:refs/remotes/upstream/main' \
+            '+refs/tags/v*:refs/upstream-tags/v*'
           commits=$(git log --no-merges --format='- `%h` %s (%ad)' --date=short main..upstream/main)
           tags=""
-          for t in $(git tag --list 'v*' --sort=-v:refname); do
-            git merge-base --is-ancestor "$t" main || tags="$tags- \`$t\`"$'\n'
+          for ref in $(git for-each-ref --sort=-v:refname --format='%(refname)' refs/upstream-tags/); do
+            t=${ref#refs/upstream-tags/}
+            git merge-base --is-ancestor "$ref" main || tags="$tags- \`$t\`"$'\n'
           done
           {
             echo "## Upstream changes not in main"

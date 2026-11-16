@@ -4,6 +4,16 @@ What each published version of rsc-brain changes. Every release carries the same
 `rsc-brain.sh` as a file of the release and its SHA-256. Versions follow `vX.Y.Z`; updates only move
 forward.
 
+## v0.7.2 (fork OriolRamos/rsc-brain)
+
+The approval fix of v0.7.1, as reworked upstream by Eric Risco on ericrisco/rsc-brain#53.
+
+- **Later operations keep their effect around a cycle of new pages.** In v0.7.1, the links of pages created in a
+  cycle were added after every other operation. A later operation of the same proposal could therefore lose its
+  effect: an `unlink` of one of those links, a `status` over a `supersedes`, a later `supersedes`, a `merge` that
+  should carry the links, or a `move` through the cycle. They now apply in the order the proposal gives (6 new
+  tests).
+
 ## v0.7.1 (fork OriolRamos/rsc-brain)
 
 v0.7.0 plus one fix, released from this fork (see `FORK.md`).

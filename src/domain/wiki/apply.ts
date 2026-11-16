@@ -40,8 +40,13 @@ export type Revised = { index?: number; pageId: string; address: string; revisio
 // another operation brings into being (a page it creates, the new address of a move) goes after it, so
 // a link listed before the page it points at still applies. Approval grouping (dependencies) is a
 // different question: "edit y" before "merge y into x" must still edit y, then merge.
+// The addresses an operation brings into being: the page it creates, or the new address of a move.
+function bornOf(o: Op): string[] {
+  return o.op === 'create' ? [o.address] : o.op === 'move' ? [o.to] : []
+}
+
 export function applyOrder(ops: Op[]): number[] {
-  const born = ops.map((o) => (o.op === 'create' ? [o.address] : o.op === 'move' ? [o.to] : []))
+  const born = ops.map(bornOf)
   const after = ops.map((o, i) => {
     const mine = new Set(uses(o))
     return ops.flatMap((_, j) => (j !== i && (born[j] ?? []).some((a) => mine.has(a)) ? [j] : []))
@@ -73,6 +78,13 @@ export async function applyOps(
   // Each page's revision before this call: an edit's baseRevision is checked against it, not against
   // what earlier operations of the same approval made of the page (a move, then an edit of it).
   const startRevision = new Map<string, number>()
+  // Creates that link each other (an index and its pages, which point back with part-of) have no order in
+  // which every link finds its page, yet the proposal was accepted because each page "is created here". A
+  // create's link to an address that a later operation of this call still brings into being waits until every
+  // operation has run, then lands as a link operation would: one more revision of the page it starts from.
+  const unborn = new Map<string, number>()
+  for (const { it } of sorted) for (const a of bornOf(it.op)) unborn.set(a, (unborn.get(a) ?? 0) + 1)
+  const deferred = new Map<string, { it: ApplyItem; links: { kind: LinkKind; to: string }[] }>()
 
   const fail = (it: ApplyItem, message: string): never => {
     throw new ApplyError(it.index, message)
@@ -203,6 +215,7 @@ export async function applyOps(
 
   for (const { it } of sorted) {
     const o = it.op
+    for (const a of bornOf(o)) unborn.set(a, (unborn.get(a) ?? 1) - 1)
     switch (o.op) {
       case 'create': {
         const taken = await db.one(
@@ -225,6 +238,12 @@ export async function applyOps(
         await setMentions({ id, address: o.address }, o.body)
         const supersedes: Row[] = []
         for (const l of o.links) {
+          if ((unborn.get(l.to) ?? 0) > 0) {
+            const waiting = deferred.get(id) ?? { it, links: [] }
+            waiting.links.push(l)
+            deferred.set(id, waiting)
+            continue
+          }
           const to = await page(it, l.to)
           if (l.kind === 'supersedes') supersedes.push(to)
           await db.query(
@@ -421,6 +440,20 @@ export async function applyOps(
         break
       }
     }
+  }
+
+  for (const [pageId, { it, links }] of deferred) {
+    const from = await db.one('SELECT * FROM pages WHERE id = $1 FOR UPDATE', [pageId])
+    if (!from) fail(it, 'the page it creates is gone before its links could be added.')
+    const superseded: Row[] = []
+    for (const l of links) {
+      const to = await page(it, l.to)
+      await addLink(it, from as Row, l.kind, to)
+      if (l.kind === 'supersedes') superseded.push(to)
+    }
+    await bump(pageId, '', [])
+    await revise(it, pageId, 'links to pages created in the same approval')
+    for (const t of superseded) await setStatus(it, t, 'superseded', pageId)
   }
 
   const pages = [...touched]

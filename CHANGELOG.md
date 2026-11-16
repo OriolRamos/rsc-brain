@@ -4,6 +4,17 @@ What each published version of rsc-brain changes. Every release carries the same
 `rsc-brain.sh` as a file of the release and its SHA-256. Versions follow `vX.Y.Z`; updates only move
 forward.
 
+## v0.7.1 (fork OriolRamos/rsc-brain)
+
+v0.7.0 plus one fix, released from this fork (see `FORK.md`).
+
+- **Proposals whose new pages link each other apply.** An index created together with its pages, each linking
+  the other way (`related` from the index, `part-of` from the pages), was accepted by `brain_propose` and
+  `brain_check` but failed on approval with `Operation 0: there is no page at ...`, and nothing was applied. A
+  create's link to a page that a later operation of the same approval creates now waits until every operation has
+  run, then lands as one more revision of the page it starts from. A link to a page nothing creates still fails
+  and applies nothing. Offered upstream as ericrisco/rsc-brain#53.
+
 ## v0.7.0
 
 A trusted agent clears the queue of proposals without opening the web.

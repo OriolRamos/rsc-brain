@@ -20,4 +20,4 @@
 
 | Change | Upstream PR | In release |
 |---|---|---|
-| Approve proposals whose new pages link each other (`src/domain/wiki/apply.ts`) | ericrisco/rsc-brain#53 | v0.7.1 |
+| Approve proposals whose new pages link each other (`src/domain/wiki/apply.ts`) | ericrisco/rsc-brain#53 | v0.7.1; upstream's rework of it in v0.7.2 |

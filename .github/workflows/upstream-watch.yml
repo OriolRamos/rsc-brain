@@ -1,0 +1,52 @@
+# Fork only (FORK.md): every Monday, list what ericrisco/rsc-brain has that this fork's main does not, in one open
+# issue labelled "upstream". It never merges: a person reads the issue and decides. Nothing left: the issue closes.
+name: upstream-watch
+on:
+  schedule: [{ cron: "0 7 * * 1" }]
+  workflow_dispatch:
+permissions: { contents: read, issues: write }
+concurrency: { group: upstream-watch, cancel-in-progress: false }
+jobs:
+  watch:
+    if: github.repository == 'OriolRamos/rsc-brain'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: https://github.com/ericrisco/rsc-brain.git
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main, fetch-depth: 0 }
+      - name: Compare with upstream
+        id: diff
+        run: |
+          git fetch --quiet --tags "$UPSTREAM" '+refs/heads/main:refs/remotes/upstream/main'
+          commits=$(git log --no-merges --format='- `%h` %s (%ad)' --date=short main..upstream/main)
+          tags=""
+          for t in $(git tag --list 'v*' --sort=-v:refname); do
+            git merge-base --is-ancestor "$t" main || tags="$tags- \`$t\`"$'\n'
+          done
+          {
+            echo "## Upstream changes not in main"
+            echo
+            echo "Compared $(date -u +%F) against \`$UPSTREAM\` (main at \`$(git rev-parse --short upstream/main)\`)."
+            echo
+            echo "### Tags not merged"
+            echo "${tags:-none}"
+            echo
+            echo "### Commits"
+            echo "${commits:-none}"
+            echo
+            echo "To take them: merge the newest tag (or upstream/main) into main on a branch, run the tests, and"
+            echo "release as FORK.md says. This issue closes by itself once nothing is left."
+          } > body.md
+          if [ -z "$commits" ] && [ -z "$tags" ]; then echo "pending=0" >> "$GITHUB_OUTPUT"; else echo "pending=1" >> "$GITHUB_OUTPUT"; fi
+      - name: Keep one issue
+        run: |
+          gh label create upstream --color 0E8A16 --description "Changes in ericrisco/rsc-brain to review" --force >/dev/null
+          open=$(gh issue list --label upstream --state open --json number --jq '.[0].number // empty')
+          if [ "${{ steps.diff.outputs.pending }}" = 1 ]; then
+            if [ -n "$open" ]; then gh issue edit "$open" --body-file body.md
+            else gh issue create --title "Upstream changes to review" --label upstream --body-file body.md; fi
+          elif [ -n "$open" ]; then
+            gh issue close "$open" --comment "Nothing upstream is missing from main any more."
+          fi

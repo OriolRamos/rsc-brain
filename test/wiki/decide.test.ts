@@ -217,6 +217,52 @@ describe('wiki decisions in the web', { skip: skipPg }, () => {
     }
   })
 
+  it('creates that link each other apply: an index and its pages, which point back with part-of', async () => {
+    const id = await propose([
+      create('cyc/index', {
+        links: [
+          { kind: 'related', to: 'cyc/a' },
+          { kind: 'related', to: 'cyc/b' },
+        ],
+      }),
+      create('cyc/a', { links: [{ kind: 'part-of', to: 'cyc/index' }] }),
+      create('cyc/b', { links: [{ kind: 'part-of', to: 'cyc/index' }] }),
+    ])
+    const r = await approve(id)
+    assert.equal(r.status, 200, r.text)
+    type Shown = { page: { revision: number }; links: { out: { kind: string; address: string }[] } }
+    const out = (p: Shown) => p.links.out.map((l) => `${l.kind} ${l.address}`).sort()
+    const index = (await page('cyc/index')) as Shown
+    assert.deepEqual(out(index), ['related cyc/a', 'related cyc/b'])
+    assert.equal(index.page.revision, 2)
+    for (const a of ['cyc/a', 'cyc/b']) {
+      const p = (await page(a)) as Shown
+      assert.deepEqual(out(p), ['part-of cyc/index'])
+      assert.equal(p.page.revision, 1)
+    }
+  })
+
+  it('a create linking to a page that nothing brings into being still applies nothing', async () => {
+    await w.db.query(`CREATE FUNCTION drop_target() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.address = 'lost/b' THEN DELETE FROM page_addresses WHERE address = 'lost/b'; END IF;
+      RETURN NULL; END $$`)
+    await w.db.query(
+      'CREATE TRIGGER drop_target AFTER INSERT ON page_addresses FOR EACH ROW EXECUTE FUNCTION drop_target()',
+    )
+    const id = await propose([
+      create('lost/a', { links: [{ kind: 'related', to: 'lost/b' }] }),
+      create('lost/b', { links: [{ kind: 'part-of', to: 'lost/a' }] }),
+    ])
+    const r = await approve(id)
+    await w.db.query('DROP TRIGGER drop_target ON page_addresses')
+    assert.deepEqual([r.status, r.body.error?.code], [409, 'apply_failed'])
+    assert.match(String(r.body.error?.message), /^Operation 0: there is no page at "lost\/b"/)
+    const n = await w.db.one<{ n: number }>(
+      "SELECT count(*)::int AS n FROM pages WHERE address LIKE 'lost/%'",
+    )
+    assert.equal(n?.n, 0)
+  })
+
   it('CA5: a failure in the middle applies nothing; the proposal stays pending with the error', async () => {
     await w.db.query(`CREATE FUNCTION fail_page() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN IF NEW.address = 'ca5/p7' THEN RAISE EXCEPTION 'injected failure'; END IF; RETURN NEW; END $$`)
